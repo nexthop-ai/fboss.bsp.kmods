@@ -31,23 +31,24 @@ th6_smbcpld-objs := th6_smbcpld_i2c.o lib/regbit-sysfs.o
 # Backported drivers.
 obj-m += backports/
 
+KDIR ?= /lib/modules/${BUILD_KERNEL}/build
+M ?= $(CURDIR)
+PWD := $(shell pwd)
+JOBS ?= $(shell nproc)
+
 # Platform specific device drivers.
 # Please sort platforms in alphabetical order.
-obj-m += anacapa/
-obj-m += icecube/
-obj-m += icetea/
-obj-m += minipack3n/
-obj-m += montblanc/
-obj-m += mtia/
-obj-m += tahansb/
-obj-m += wedge800/
-
-KDIR ?= /lib/modules/${BUILD_KERNEL}/build
-
-PWD := $(shell pwd)
+include $(M)/anacapa/Makefile
+include $(M)/icecube/Makefile
+include $(M)/icetea/Makefile
+include $(M)/minipack3n/Makefile
+include $(M)/montblanc/Makefile
+include $(M)/mtia/Makefile
+include $(M)/tahansb/Makefile
+include $(M)/wedge800/Makefile
 
 kmods:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	$(MAKE) -j $(JOBS) -C $(KDIR) M=$(PWD) modules
 
 install: kmods
 	$(MAKE) INSTALL_MOD_DIR=fboss-kmods -C $(KDIR) M=$(PWD) modules_install
