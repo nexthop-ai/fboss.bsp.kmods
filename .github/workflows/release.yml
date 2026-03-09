@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  srpm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rpmbuild
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build source RPM
+        run: |
+          SPEC=rpmbuild/fboss_bsp_kmods.spec
+          NAME=$(grep '^Name:' "$SPEC" | awk '{print $2}')
+          VERSION=$(grep '^Version:' "$SPEC" | awk '{print $2}')
+          mkdir -p rpmbuild_out/{SOURCES,SPECS,SRPMS}
+          tar czf rpmbuild_out/SOURCES/${NAME}-${VERSION}.tar.gz \
+            --transform "s,^,${NAME}-${VERSION}/," \
+            kmods/ rpmbuild/
+          rpmbuild -bs --define "_topdir $(pwd)/rpmbuild_out" "$SPEC"
+
+      - name: Upload source RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: srpm
+          path: rpmbuild_out/SRPMS/*.src.rpm
+
+  rpm:
+    runs-on: ubuntu-latest
+    container: rockylinux:9
+    strategy:
+      matrix:
+        kernel:
+          - "6.4.3"
+          - "6.11.1"
+          - "6.16.1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          dnf install -y rpm-build rsync tar gcc make git python3-pyyaml openssl-devel flex bison bc elfutils-libelf-devel kernel-abi-stablelists kernel-rpm-macros
+
+      - name: Clone fboss kernel build scripts
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/facebook/fboss.git /tmp/fboss
+          cd /tmp/fboss
+          git sparse-checkout set fboss-image/kernel
+
+      - name: Get fboss kernel scripts hash
+        id: fboss-rev
+        run: |
+          SHA=$(git -C /tmp/fboss rev-parse HEAD:fboss-image/kernel)
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore kernel build cache
+        id: kernel-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/kernel-build
+          key: kernel-build-${{ matrix.kernel }}-${{ steps.fboss-rev.outputs.sha }}
+
+      - name: Build kernel
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: /tmp/fboss/fboss-image/kernel/scripts/build_kernel.sh ${{ matrix.kernel }} /tmp/kernel-build
+
+      - name: Save kernel build cache
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/kernel-build
+          key: kernel-build-${{ matrix.kernel }}-${{ steps.fboss-rev.outputs.sha }}
+
+      - name: Install kernel-devel
+        run: |
+          rpm -ivh --nodeps /tmp/kernel-build/kernel-devel-*.rpm
+          KVER=$(rpm -qp --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}\n' /tmp/kernel-build/kernel-devel-*.rpm)
+          mkdir -p /lib/modules/${KVER}
+          ln -sf /usr/src/kernels/${KVER} /lib/modules/${KVER}/build
+
+      - name: Build kmod RPM
+        run: |
+          SPEC=rpmbuild/fboss_bsp_kmods.spec
+          NAME=$(grep '^Name:' "$SPEC" | awk '{print $2}')
+          VERSION=$(grep '^Version:' "$SPEC" | awk '{print $2}')
+          KVER=$(rpm -qp --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}\n' /tmp/kernel-build/kernel-devel-*.rpm)
+          mkdir -p rpmbuild_out/{SOURCES,SPECS,RPMS,SRPMS,BUILD,BUILDROOT}
+          tar czf rpmbuild_out/SOURCES/${NAME}-${VERSION}.tar.gz \
+            --transform "s,^,${NAME}-${VERSION}/," \
+            kmods/ rpmbuild/
+          rpmbuild -bb \
+            --define "_topdir $(pwd)/rpmbuild_out" \
+            --define "rpm_kernel_version ${KVER}" \
+            "$SPEC"
+
+      - name: Upload kmod RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: fboss_bsp_kmods-${{ matrix.kernel }}
+          path: rpmbuild_out/RPMS/**/*.rpm
+
+  release:
+    needs: [srpm, rpm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find artifacts -name '*.rpm' -exec cp {} artifacts/ \;
+          gh release create "${{ github.ref_name }}" artifacts/*.rpm \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
