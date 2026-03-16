@@ -24,6 +24,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y rpm
 
+      - name: Set version from tag
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          sed -i "s/^Version:.*/Version: ${VERSION}/" rpmbuild/fboss_bsp_kmods.spec
+
       - name: Build source RPM
         run: |
           SPEC=rpmbuild/fboss_bsp_kmods.spec
@@ -52,6 +58,12 @@ jobs:
           - "6.16.1"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          sed -i "s/^Version:.*/Version: ${VERSION}/" rpmbuild/fboss_bsp_kmods.spec
 
       - name: Install build dependencies
         run: |
