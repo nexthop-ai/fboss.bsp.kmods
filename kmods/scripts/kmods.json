@@ -43,6 +43,7 @@
         "mp3_smbcpld",
         "mp3n_fancpld",
         "mp3n_scmcpld",
+        "mspm0",
         "mtia_fan_watchdog",
         "mtia_smbcpld",
         "tahansb_fancpld",
