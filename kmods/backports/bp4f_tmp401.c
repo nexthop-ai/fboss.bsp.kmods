@@ -34,10 +34,6 @@ create_dummy_kmod(tmp401);
 #include <linux/regmap.h>
 #include <linux/slab.h>
 
-/* Addresses to scan */
-static const unsigned short normal_i2c[] = { 0x48, 0x49, 0x4a, 0x4c, 0x4d,
-	0x4e, 0x4f, I2C_CLIENT_END };
-
 enum chips { tmp401, tmp411, tmp431, tmp432, tmp435 };
 
 /*
@@ -775,7 +771,6 @@ static struct i2c_driver tmp401_driver = {
 	.probe		= tmp401_probe,
 	.id_table	= tmp401_id,
 	.detect		= tmp401_detect,
-	.address_list	= normal_i2c,
 };
 
 module_i2c_driver(tmp401_driver);
