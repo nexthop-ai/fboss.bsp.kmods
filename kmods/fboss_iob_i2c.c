@@ -41,6 +41,14 @@
 #define FBIOB_I2C_EN_MASTER_FUNC	BIT(0)
 
 /*
+ * Divisor constants calculated from formula: 50MHz/(SCL_Freq * 5) - 1
+ */
+#define FBIOB_I2C_TIMING_DIV_100K	0x63
+#define FBIOB_I2C_TIMING_DIV_400K	0x18
+
+#define FBIOB_I2C_TIMING_DIV_MASK	GENMASK(7, 0)
+
+/*
  * I2C Deivce Interrupt Control Register.
  */
 #define FBIOB_I2C_INTR_XFER_TIMEOUT_STS		BIT(3)
@@ -65,10 +73,6 @@
 #define FBIOB_I2C_TX_BUF_SIZE_SHIFT			8
 #define FBIOB_I2C_RX_BUF_SIZE_SHIFT			16
 #define FBIOB_I2C_ACT_RX_BUF_SIZE_SHIFT	    24
-#define FBIOB_I2C_BUF_SIZE_CTRL_REG_LEN     32
-#define FBIOB_I2C_ACT_BUF_SIZE_MASK	GENMASK(	\
-		FBIOB_I2C_BUF_SIZE_CTRL_REG_LEN,		\
-		FBIOB_I2C_ACT_RX_BUF_SIZE_SHIFT)
 #define FBIOB_I2C_RX_BUF_SIZE_MASK	GENMASK(	\
 		FBIOB_I2C_ACT_RX_BUF_SIZE_SHIFT-1,		\
 		FBIOB_I2C_RX_BUF_SIZE_SHIFT)
@@ -105,6 +109,7 @@ struct fbiob_i2c_bus {
 	struct i2c_adapter adap;
 	struct i2c_msg *msg;
 	enum fbiob_i2c_state state;
+	__u32 bus_freq_hz; /* Stores validated bus frequency */
 };
 
 static u32 i2c_csr_read(struct fbiob_i2c_bus *bus, unsigned int offset)
@@ -176,6 +181,47 @@ static int fbiob_i2c_reset(struct fbiob_i2c_bus *bus)
 	i2c_csr_write(bus, FBIOB_I2C_REG_FUNC_CTRL, val);
 
 	return 0;
+}
+
+/*
+ * fbiob_i2c_set_timing() - Configure the SCL clock divisor register
+ * @bus: Pointer to the I2C bus private structure
+ *
+ * This function performs modification operations on the timing configuration
+ * register. It strictly validates the input frequency, filters out invalid or
+ * unconfigured values, and applies a safe fallback to 100KHz.
+ * Bits[10:8] (sample rate) are left untouched.
+ */
+static void fbiob_i2c_set_timing(struct fbiob_i2c_bus *bus)
+{
+	u32 val;
+	u32 div;
+
+	/* Strict frequency validation block to filter out invalid values */
+	switch (bus->bus_freq_hz) {
+	case 400000:
+		div = FBIOB_I2C_TIMING_DIV_400K;
+		break;
+	case 100000:
+		div = FBIOB_I2C_TIMING_DIV_100K;
+		break;
+	default:
+		div = FBIOB_I2C_TIMING_DIV_100K;
+		bus->bus_freq_hz = 100000;
+		break;
+	}
+
+	/* Read current register state to preserve other fields */
+	val = i2c_csr_read(bus, FBIOB_I2C_REG_TIMING_CFG);
+
+	/* Clear bit[7:0] only */
+	val &= ~FBIOB_I2C_TIMING_DIV_MASK;
+
+	/* Apply the validated divisor */
+	val |= div;
+
+	/* Write back to the register */
+	i2c_csr_write(bus, FBIOB_I2C_REG_TIMING_CFG, val);
 }
 
 /*
@@ -524,6 +570,9 @@ static int fbiob_i2c_probe(struct auxiliary_device *auxdev,
 		return -ENOMEM;
 	dev_set_drvdata(dev, bus);
 
+	/* Fetch raw frequency value provided by userspace/caller */
+	bus->bus_freq_hz = aux_adap->data.i2c_data.bus_freq_hz;
+
 	bus->csr_bus_addr = aux_adap->data.csr_offset;
 	res = devm_request_mem_region(dev, bus->csr_bus_addr,
 				FBIOB_I2C_BLK_SIZE, auxdev->name);
@@ -549,12 +598,15 @@ static int fbiob_i2c_probe(struct auxiliary_device *auxdev,
 	if (ret)
 		return ret;
 
+	/* Filter invalid frequencies and configure timing register */
+	fbiob_i2c_set_timing(bus);
+
 	ret = i2c_add_adapter(&bus->adap);
 	if (ret)
 		return ret;
 
-	dev_info(dev, "i2c bus %d registered (master at 0x%x)",
-		 bus->adap.nr, bus->csr_bus_addr);
+	dev_info(dev, "i2c bus %d registered (master at 0x%x, freq: %u Hz)",
+		 bus->adap.nr, bus->csr_bus_addr, bus->bus_freq_hz);
 	return 0;
 }
 
