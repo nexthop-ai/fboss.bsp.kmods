@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/string.h>
 #include <linux/sysfs.h>
 
@@ -32,6 +33,8 @@ enum variants {
 	raa_dmpvr2_3rail,
 	raa_dmpvr2_hv,
 };
+
+static const struct i2c_device_id raa_dmpvr_id[];
 
 struct isl68137_channel {
 	u32 vout_voltage_divider[2];
@@ -147,6 +150,23 @@ static const struct attribute_group *isl68137_attribute_groups[] = {
 	&enable_group,
 	NULL,
 };
+
+static const void *isl68137_get_match_data(struct i2c_client *client)
+{
+	const struct of_device_id *of_id;
+	const struct i2c_device_id *i2c_id;
+
+	of_id = of_match_device(client->dev.driver->of_match_table,
+				&client->dev);
+	if (of_id)
+		return of_id->data;
+
+	i2c_id = i2c_match_id(raa_dmpvr_id, client);
+	if (i2c_id)
+		return (const void *)i2c_id->driver_data;
+
+	return NULL;
+}
 
 static int raa_dmpvr2_read_word_data(struct i2c_client *client, int page,
 				     int phase, int reg)
@@ -307,16 +327,19 @@ static int isl68137_probe_child_from_dt(struct device *dev,
 static int isl68137_probe_from_dt(struct device *dev,
 				  struct isl68137_data *data)
 {
-	const struct device_node *np = dev->of_node;
+	struct device_node *child;
+	struct device_node *np = dev->of_node;
 	int err;
 
-	for_each_child_of_node_scoped(np, child) {
+	for_each_child_of_node(np, child) {
 		if (strcmp(child->name, "channel"))
 			continue;
 
 		err = isl68137_probe_child_from_dt(dev, child, data);
-		if (err)
+		if (err) {
+			of_node_put(child);
 			return err;
+		}
 	}
 
 	return 0;
@@ -345,7 +368,7 @@ static int isl68137_probe(struct i2c_client *client)
 	memcpy(&data->info, &raa_dmpvr_info, sizeof(data->info));
 	info = &data->info;
 
-	switch ((uintptr_t)i2c_get_match_data(client)) {
+	switch ((uintptr_t)isl68137_get_match_data(client)) {
 	case raa_dmpvr1_2rail:
 		info->pages = 2;
 		info->R[PSC_VOLTAGE_IN] = 3;
