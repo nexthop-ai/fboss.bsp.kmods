@@ -53,8 +53,7 @@ make -C kmods
 
 %install
 install -d %{buildroot}%{kmod_dir}
-install -t %{buildroot}%{kmod_dir} kmods/*.ko
-install -t %{buildroot}%{kmod_dir} kmods/*/*.ko
+find kmods -type f -name '*.ko' -exec install -t %{buildroot}%{kmod_dir} {} +
 install -d %{buildroot}%{util_dir}
 install -t %{buildroot}%{util_dir} kmods/scripts/fbsp-remove.sh
 install -t %{buildroot}%{util_dir} kmods/scripts/kmods.json
