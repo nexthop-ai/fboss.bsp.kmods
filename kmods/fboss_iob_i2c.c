@@ -206,6 +206,8 @@ static void fbiob_i2c_set_timing(struct fbiob_i2c_bus *bus)
 		div = FBIOB_I2C_TIMING_DIV_100K;
 		break;
 	default:
+		dev_warn(bus->dev, "Invalid I2C frequency %u Hz, \
+			reverting to default 100 KHz\n", bus->bus_freq_hz);
 		div = FBIOB_I2C_TIMING_DIV_100K;
 		bus->bus_freq_hz = 100000;
 		break;
