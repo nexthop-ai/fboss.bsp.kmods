@@ -376,9 +376,8 @@ static int smbcpld_probe(struct i2c_client *client)
 	 * the real-time hardware status when polled via sysfs.
 	 */
 	ret = i2c_smbus_write_byte_data(client, SMB_REG_VR_ALERT_MASK, 0x00);
-	if (ret < 0) {
+	if (ret < 0)
 		dev_err(&client->dev, "Failed to unmask VR Alert Register: %d\n", ret);
-	}
 
 	return 0;
 }
